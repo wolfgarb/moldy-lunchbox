@@ -1,11 +1,12 @@
 const router = require('express').Router();
-const { User, Post, Vote } = require('../../models');
+const { User, Post, Vote, Comment } = require('../../models');
+const withAuth = require('../../utils/auth');
 
 // GET /api/users
 router.get('/', (req, res) => {
   // access our user model and run findAll method
   User.findAll({
-    attributes: { exclude: ['password'] },
+    attributes: { exclude: ['password'] }
   })
     .then((dbUserData) => res.json(dbUserData))
     .catch((err) => {
@@ -18,32 +19,31 @@ router.get('/', (req, res) => {
 router.get('/:id', (req, res) => {
   User.findOne({
     attributes: {
-      exclude: ['password'],
-      where: {
-        id: req.params.id,
-      },
-      include: [
-        {
-          model: Post,
-          attributes: ['id', 'title', 'post_url', 'created_at'],
-        },
-        // comment model
-        {
-          model: Comment,
-          attributes: ['id', 'comment_text', 'created_at'],
-          include: {
-            mode: Post,
-            attributes: ['title'],
-          },
-        },
-        {
-          model: Post,
-          attributes: ['title'],
-          through: Vote,
-          as: 'voted_posts',
-        },
-      ],
+      exclude: ['password']
     },
+    where: {
+      id: req.params.id
+    },
+    include: [
+      {
+        model: Post,
+        attributes: ['id', 'title', 'post_url', 'created_at']
+      },
+      {
+        model: Comment,
+        attributes: ['id', 'comment_text', 'created_at'],
+        include: {
+          mode: Post,
+          attributes: ['title']
+        }
+      },
+      {
+        model: Post,
+        attributes: ['title'],
+        through: Vote,
+        as: 'voted_posts'
+      }
+    ]
   })
     .then((dbUserData) => {
       if (!dbUserData) {
@@ -59,25 +59,33 @@ router.get('/:id', (req, res) => {
 });
 
 // POST /api/users
-router.post('/', (req, res) => {
+router.post('/', withAuth, (req, res) => {
   User.create({
     username: req.body.username,
     email: req.body.email,
-    password: req.body.password,
+    password: req.body.password
   })
-    .then((dbUserData) => res.json(dbUserData))
+    .then((dbUserData) => {
+      req.session.save(() => {
+        req.session.user_id = dbUserData.id;
+        req.session.username = dbUserData.username;
+        req.session.loggedIn = true;
+
+        res.json(dbUserData);
+      });
+    })
     .catch((err) => {
       console.log(err);
       res.status(500).json(err);
     });
 });
 
-router.post('/login', (req, res) => {
+router.post('/login', withAuth, (req, res) => {
   // find user
   User.findOne({
     where: {
-      email: req.body.email,
-    },
+      email: req.body.email
+    }
   }).then((dbUserData) => {
     if (!dbUserData) {
       res
@@ -92,17 +100,35 @@ router.post('/login', (req, res) => {
       return;
     }
 
-    res.json({ user: dbUserData, message: 'You are now logged in' });
+    req.session.save(() => {
+      // declare session variables
+      req.session.user_id = dbUserData.id;
+      req.session.username = dbUserData.username;
+      req.session.loggedIn = true;
+
+      res.json({ user: dbUserData, message: 'You are now logged in' });
+    });
   });
 });
 
+// LOGOUT
+router.post('/logout', withAuth, (req, res) => {
+  if (req.session.loggedIn) {
+    req.session.destroy(() => {
+      res.status(204).end();
+    });
+  } else {
+    res.status(404).end();
+  }
+});
+
 // PUT /api/users/1
-router.put('/:id', (req, res) => {
+router.put('/:id', withAuth, (req, res) => {
   User.update(req.body, {
     individualHooks: true,
     where: {
-      id: req.params.id,
-    },
+      id: req.params.id
+    }
   })
     .then((dbUserData) => {
       if (!dbUserData[0]) {
@@ -118,11 +144,11 @@ router.put('/:id', (req, res) => {
 });
 
 // DELETE /api/users/1
-router.delete('/:id', (req, res) => {
+router.delete('/:id', withAuth, (req, res) => {
   User.destroy({
     where: {
-      id: req.params.id,
-    },
+      id: req.params.id
+    }
   })
     .then((dbUserData) => {
       if (!dbUserData) {
